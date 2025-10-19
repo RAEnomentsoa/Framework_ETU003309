@@ -11,6 +11,7 @@ public class RouterServlet extends HttpServlet {
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         String path = req.getRequestURI().substring(req.getContextPath().length());
+        
         if (path.isEmpty()) path = "/";
         handleUnknownUrl(path, resp);
     }
