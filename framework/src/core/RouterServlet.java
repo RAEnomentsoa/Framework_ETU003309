@@ -62,6 +62,7 @@ public void init() {
                 if (clazz.getSimpleName().endsWith("Controller")) {
                     Object controller = clazz.getDeclaredConstructor().newInstance();
                     registerController(controller);
+                    System.out.println("Controllers");
                     System.out.println("Registered: " + clazz.getName());
                 }
             } catch (Exception e) {
