@@ -110,8 +110,14 @@ public void init() {
 
         try {
             Object controller = controllers.get(path);
+            String controllerName = controller.getClass().getSimpleName();
+            String methodName = method.getName();
             String result;
-            if (method.getParameterCount() == 2) {
+             if (method.getParameterCount() == 3) {
+        // pass path, method name and controller name
+             result = (String) method.invoke(controller, path, methodName, controllerName);
+           }
+            else if (method.getParameterCount() == 2) {
                 result = (String) method.invoke(controller, path, method.getName());
             } else {
                 result = (String) method.invoke(controller);
