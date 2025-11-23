@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class ModelView {
-    // sprint 4 bis
+    // sprint 5 bis
 
     private String view; // JSP path
     private Map<String, Object> data; // Variables to send to JSP
