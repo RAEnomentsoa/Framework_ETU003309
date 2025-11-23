@@ -63,6 +63,9 @@ public class RouterServlet extends HttpServlet {
                     if (clazz.getSimpleName().endsWith("Controller")) {
                         Object controller = clazz.getDeclaredConstructor().newInstance();
                         registerController(controller);
+                        getServletContext().setAttribute("routes", routes);
+                        getServletContext().setAttribute("controllers", controllers);
+
                         System.out.println("Controllers");
                         System.out.println("Registered: " + clazz.getName());
                     }
@@ -112,29 +115,45 @@ public class RouterServlet extends HttpServlet {
             Object controller = controllers.get(path);
             String controllerName = controller.getClass().getSimpleName();
             String methodName = method.getName();
-            String result;
-            // detect return type
+
             Class<?> returnType = method.getReturnType();
             String returnTypeName = returnType.getSimpleName();
 
-            // call controller
-            if (method.getParameterCount() == 4) {
-                result = (String) method.invoke(controller, path, methodName, controllerName, returnTypeName);
-            } else if (method.getParameterCount() == 3) {
-                // pass path, method name and controller name
-                result = (String) method.invoke(controller, path, methodName, controllerName);
-            } else if (method.getParameterCount() == 2) {
-                result = (String) method.invoke(controller, path, method.getName());
-            } else {
-                result = (String) method.invoke(controller);
+            Object result = method.getParameterCount() == 4
+                    ? method.invoke(controller, path, methodName, controllerName,
+                            method.getReturnType().getSimpleName())
+                    : method.getParameterCount() == 3 ? method.invoke(controller, path, methodName, controllerName)
+                            : method.getParameterCount() == 2 ? method.invoke(controller, path, method.getName())
+                                    : method.invoke(controller);
+
+            // detect Modelview
+            // CASE 1: Controller returns ModelView → JSP
+            if (result instanceof ModelView mv) {
+
+                // send attributes to JSP
+                for (Map.Entry<String, Object> entry : mv.getData().entrySet()) {
+                    req.setAttribute(entry.getKey(), entry.getValue());
+                }
+
+                // forward to JSP
+                req.getRequestDispatcher("/WEB-INF/views/" + mv.getView()).forward(req, resp);
+                return;
             }
+
+            // CASE 2: Controller returns String → print normally
+            if (result instanceof String str) {
+                resp.getWriter().write(str);
+                return;
+            }
+
+            // CASE 3: Unsupported return
+            resp.getWriter().write("Unsupported return type from controller");
 
             // show type + value on response
             resp.getWriter().write("controller:" + controller.getClass().getSimpleName() + "\n");
             resp.getWriter().write("method: " + method.getName() + "\n");
             resp.getWriter().write("Return type: " + returnType.getSimpleName() + "\n");
 
-            resp.getWriter().write(result);
         } catch (Exception e) {
             e.printStackTrace();
             resp.setStatus(500);
