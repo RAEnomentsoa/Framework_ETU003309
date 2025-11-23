@@ -17,61 +17,61 @@ public class RouterServlet extends HttpServlet {
     public final Map<String, Method> routes = new HashMap<>();
     public final Map<String, Object> controllers = new HashMap<>();
 
-    //test d'un controller
-    // @Override 
+    // test d'un controller
+    // @Override
     // public void init() {
-    //     System.out.println(" Router initialized");
-    //     try {
-    //         Class<?> controllerClass = Class.forName("app.controllers.TestController");
-    //         Object controller = controllerClass.getDeclaredConstructor().newInstance();
-    //         registerController(controller); 
-    //     } catch (Exception e) {
-    //         e.printStackTrace();
-    //     }
+    // System.out.println(" Router initialized");
+    // try {
+    // Class<?> controllerClass = Class.forName("app.controllers.TestController");
+    // Object controller = controllerClass.getDeclaredConstructor().newInstance();
+    // registerController(controller);
+    // } catch (Exception e) {
+    // e.printStackTrace();
+    // }
     // }
 
     // scanner tout les controller
     @Override
-public void init() {
-    System.out.println("Router initialized");
-    String basePackage = "app.controllers";
-    String path = getServletContext().getRealPath("/WEB-INF/classes/" + basePackage.replace('.', '/'));
+    public void init() {
+        System.out.println("Router initialized");
+        String basePackage = "app.controllers";
+        String path = getServletContext().getRealPath("/WEB-INF/classes/" + basePackage.replace('.', '/'));
 
-    File directory = new File(path);
-    if (!directory.exists()) {
-        System.out.println("Controllers directory not found: " + path);
-        return;
+        File directory = new File(path);
+        if (!directory.exists()) {
+            System.out.println("Controllers directory not found: " + path);
+            return;
+        }
+
+        scanAndRegisterControllers(directory, basePackage);
     }
 
-    scanAndRegisterControllers(directory, basePackage);
-}
+    private void scanAndRegisterControllers(File directory, String basePackage) {
+        File[] files = directory.listFiles();
+        if (files == null)
+            return;
 
-            private void scanAndRegisterControllers(File directory, String basePackage) {
-    File[] files = directory.listFiles();
-    if (files == null) return;
+        for (File file : files) {
+            if (file.isDirectory()) {
+                scanAndRegisterControllers(file, basePackage + "." + file.getName());
+            } else if (file.getName().endsWith(".class")) {
+                String className = file.getName().replace(".class", "");
+                try {
+                    Class<?> clazz = Class.forName(basePackage + "." + className);
 
-    for (File file : files) {
-        if (file.isDirectory()) {
-            scanAndRegisterControllers(file, basePackage + "." + file.getName());
-        } else if (file.getName().endsWith(".class")) {
-            String className = file.getName().replace(".class", "");
-            try {
-                Class<?> clazz = Class.forName(basePackage + "." + className);
-
-                // Optional: check annotation like @Controller
-                if (clazz.getSimpleName().endsWith("Controller")) {
-                    Object controller = clazz.getDeclaredConstructor().newInstance();
-                    registerController(controller);
-                    System.out.println("Controllers");
-                    System.out.println("Registered: " + clazz.getName());
+                    // Optional: check annotation like @Controller
+                    if (clazz.getSimpleName().endsWith("Controller")) {
+                        Object controller = clazz.getDeclaredConstructor().newInstance();
+                        registerController(controller);
+                        System.out.println("Controllers");
+                        System.out.println("Registered: " + clazz.getName());
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
         }
     }
-}
-    
 
     // register controller
     public void registerController(Object controller) {
@@ -113,15 +113,27 @@ public void init() {
             String controllerName = controller.getClass().getSimpleName();
             String methodName = method.getName();
             String result;
-             if (method.getParameterCount() == 3) {
-        // pass path, method name and controller name
-             result = (String) method.invoke(controller, path, methodName, controllerName);
-           }
-            else if (method.getParameterCount() == 2) {
+            // detect return type
+            Class<?> returnType = method.getReturnType();
+            String returnTypeName = returnType.getSimpleName();
+
+            // call controller
+            if (method.getParameterCount() == 4) {
+                result = (String) method.invoke(controller, path, methodName, controllerName, returnTypeName);
+            } else if (method.getParameterCount() == 3) {
+                // pass path, method name and controller name
+                result = (String) method.invoke(controller, path, methodName, controllerName);
+            } else if (method.getParameterCount() == 2) {
                 result = (String) method.invoke(controller, path, method.getName());
             } else {
                 result = (String) method.invoke(controller);
             }
+
+            // show type + value on response
+            resp.getWriter().write("controller:" + controller.getClass().getSimpleName() + "\n");
+            resp.getWriter().write("method: " + method.getName() + "\n");
+            resp.getWriter().write("Return type: " + returnType.getSimpleName() + "\n");
+
             resp.getWriter().write(result);
         } catch (Exception e) {
             e.printStackTrace();
