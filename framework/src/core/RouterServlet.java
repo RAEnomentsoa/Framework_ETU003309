@@ -94,6 +94,7 @@ public class RouterServlet extends HttpServlet {
         RoutePattern matched = null;
         Map<String, String> params = null;
 
+        // Look for a matching route
         for (RoutePattern rp : routePatterns) {
             params = rp.match(path);
             if (params != null) {
@@ -109,16 +110,17 @@ public class RouterServlet extends HttpServlet {
         }
 
         try {
-            // Invoke controller
+            // Prepare to inject parameters
             Object result;
 
-            if (matched.method.getParameterCount() == 1 &&
-                    matched.method.getParameterTypes()[0] == Map.class) {
-
+            // If the method has one parameter and it is a Map, inject the params into it
+            if (matched.method.getParameterCount() == 1 && matched.method.getParameterTypes()[0] == Map.class) {
                 result = matched.method.invoke(matched.controller, params);
 
             } else {
-                result = matched.method.invoke(matched.controller);
+                // Inject individual parameters based on method signature
+                Object[] methodArgs = injectParameters(matched.method, req);
+                result = matched.method.invoke(matched.controller, methodArgs);
             }
 
             // Handle ModelView → JSP
@@ -137,7 +139,7 @@ public class RouterServlet extends HttpServlet {
                 return;
             }
 
-            // Unsupported return
+            // Unsupported return type
             resp.getWriter().write("Unsupported return type from controller");
 
         } catch (Exception e) {
@@ -146,6 +148,45 @@ public class RouterServlet extends HttpServlet {
             resp.getWriter().write("500 - Server error: " + e.getMessage());
         }
     }
+
+    private Object[] injectParameters(Method method, HttpServletRequest req) {
+        Object[] params = new Object[method.getParameterCount()];
+
+        for (int i = 0; i < method.getParameterCount(); i++) {
+            // Get the parameter type
+            Class<?> paramType = method.getParameterTypes()[i];
+
+            // Handle different parameter types (String, Integer, etc.)
+            String paramValue = null;
+            String paramName = method.getParameters()[i].getName(); // Get the parameter name
+
+            // Try to get the value from request parameters (query string or form data)
+            paramValue = req.getParameter(paramName);
+
+            if (paramValue == null) {
+                // You may want to handle path parameters here if needed
+                // Ex: extract from path if your framework supports that
+            }
+
+            // Convert to the correct type
+            if (paramType == String.class) {
+                params[i] = paramValue;
+            } else if (paramType == Integer.class || paramType == int.class) {
+                if (paramValue != null) {
+                    params[i] = Integer.parseInt(paramValue);
+                }
+            } else if (paramType == Boolean.class || paramType == boolean.class) {
+                if (paramValue != null) {
+                    params[i] = Boolean.parseBoolean(paramValue);
+                }
+            } else {
+                // Handle other types or fallback
+                params[i] = paramValue; // Default to String if type not found
+            }
+        }
+        return params;
+    }
+
 }
 
 // test d'un controller
