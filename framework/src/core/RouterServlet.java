@@ -153,37 +153,35 @@ public class RouterServlet extends HttpServlet {
         Object[] params = new Object[method.getParameterCount()];
 
         for (int i = 0; i < method.getParameterCount(); i++) {
-            // Get the parameter type
-            Class<?> paramType = method.getParameterTypes()[i];
 
-            // Handle different parameter types (String, Integer, etc.)
-            String paramValue = null;
-            String paramName = method.getParameters()[i].getName(); // Get the parameter name
+            // Parameter metadata
+            java.lang.reflect.Parameter parameter = method.getParameters()[i];
+            Class<?> paramType = parameter.getType();
+            String paramName = parameter.getName(); // fallback if no annotation
 
-            // Try to get the value from request parameters (query string or form data)
-            paramValue = req.getParameter(paramName);
+            // Check for @RequestParam annotation
+            core.annotation.RequestParam rp = parameter.getAnnotation(core.annotation.RequestParam.class);
+            String key = (rp != null) ? rp.value() : paramName;
 
-            if (paramValue == null) {
-                // You may want to handle path parameters here if needed
-                // Ex: extract from path if your framework supports that
-            }
+            // Get value from request
+            String rawValue = req.getParameter(key);
 
-            // Convert to the correct type
+            // Convert to correct type
+            Object converted = null;
+
             if (paramType == String.class) {
-                params[i] = paramValue;
-            } else if (paramType == Integer.class || paramType == int.class) {
-                if (paramValue != null) {
-                    params[i] = Integer.parseInt(paramValue);
-                }
-            } else if (paramType == Boolean.class || paramType == boolean.class) {
-                if (paramValue != null) {
-                    params[i] = Boolean.parseBoolean(paramValue);
-                }
+                converted = rawValue;
+            } else if ((paramType == int.class || paramType == Integer.class) && rawValue != null) {
+                converted = Integer.parseInt(rawValue);
+            } else if ((paramType == boolean.class || paramType == Boolean.class) && rawValue != null) {
+                converted = Boolean.parseBoolean(rawValue);
             } else {
-                // Handle other types or fallback
-                params[i] = paramValue; // Default to String if type not found
+                converted = rawValue; // fallback default
             }
+
+            params[i] = converted;
         }
+
         return params;
     }
 
