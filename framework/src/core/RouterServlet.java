@@ -119,7 +119,8 @@ public class RouterServlet extends HttpServlet {
 
             } else {
                 // Inject individual parameters based on method signature
-                Object[] methodArgs = injectParameters(matched.method, req);
+                Object[] methodArgs = injectParameters(matched.method, req, params);
+
                 result = matched.method.invoke(matched.controller, methodArgs);
             }
 
@@ -149,7 +150,7 @@ public class RouterServlet extends HttpServlet {
         }
     }
 
-    private Object[] injectParameters(Method method, HttpServletRequest req) {
+    private Object[] injectParameters(Method method, HttpServletRequest req, Map<String, String> pathParams) {
         Object[] params = new Object[method.getParameterCount()];
 
         for (int i = 0; i < method.getParameterCount(); i++) {
@@ -159,22 +160,37 @@ public class RouterServlet extends HttpServlet {
             Class<?> paramType = parameter.getType();
             String paramName = parameter.getName(); // fallback if no annotation
 
-            // Check for @RequestParam annotation
+            // ORDER 1: Check @RequestParam annotation
             core.annotation.RequestParam rp = parameter.getAnnotation(core.annotation.RequestParam.class);
             String key = (rp != null) ? rp.value() : paramName;
 
-            // Get value from request
-            String rawValue = req.getParameter(key);
+            String rawValue = null;
+
+            // ORDER 2: FIRST try URL {variables}
+            if (pathParams != null && pathParams.containsKey(key)) {
+                rawValue = pathParams.get(key);
+            }
+
+            // ORDER 3: If not found, try query string / form
+            if (rawValue == null) {
+                rawValue = req.getParameter(key);
+            }
+
+            // ORDER 4: If still null → you decide (set null or throw error)
+            // For now: allow null
+
+            // Option 2:
+            // thorw new RuntimeException("Missing required parameter: " + key);
 
             // Convert to correct type
             Object converted = null;
 
             if (paramType == String.class) {
                 converted = rawValue;
-            } else if ((paramType == int.class || paramType == Integer.class) && rawValue != null) {
-                converted = Integer.parseInt(rawValue);
-            } else if ((paramType == boolean.class || paramType == Boolean.class) && rawValue != null) {
-                converted = Boolean.parseBoolean(rawValue);
+            } else if ((paramType == int.class || paramType == Integer.class)) {
+                converted = (rawValue != null) ? Integer.parseInt(rawValue) : 0;
+            } else if ((paramType == boolean.class || paramType == Boolean.class)) {
+                converted = (rawValue != null) ? Boolean.parseBoolean(rawValue) : false;
             } else {
                 converted = rawValue; // fallback default
             }

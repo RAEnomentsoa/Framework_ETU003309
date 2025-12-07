@@ -26,6 +26,9 @@ public class RoutePattern {
         String regexString = path.replaceAll("\\{[^/]+}", "([^/]+)");
 
         this.regex = Pattern.compile("^" + regexString + "$");
+
+        // output the path Method mapping
+        System.out.println("Registered route: " + path + " -> " + method.getName());
     }
 
     public Map<String, String> match(String url) {
