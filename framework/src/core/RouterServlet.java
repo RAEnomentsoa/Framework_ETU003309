@@ -215,5 +215,3 @@ public class RouterServlet extends HttpServlet {
 // e.printStackTrace();
 // }
 // }
-
-// scanner tout les controller
