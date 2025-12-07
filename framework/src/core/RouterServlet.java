@@ -9,28 +9,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
-import java.util.HashMap;
 import java.util.Map;
 
 public class RouterServlet extends HttpServlet {
 
-    public final Map<String, Method> routes = new HashMap<>();
-    public final Map<String, Object> controllers = new HashMap<>();
+    // New dynamic route system
+    public final java.util.List<RoutePattern> routePatterns = new java.util.ArrayList<>();
 
-    // test d'un controller
-    // @Override
-    // public void init() {
-    // System.out.println(" Router initialized");
-    // try {
-    // Class<?> controllerClass = Class.forName("app.controllers.TestController");
-    // Object controller = controllerClass.getDeclaredConstructor().newInstance();
-    // registerController(controller);
-    // } catch (Exception e) {
-    // e.printStackTrace();
-    // }
-    // }
-
-    // scanner tout les controller
     @Override
     public void init() {
         System.out.println("Router initialized");
@@ -55,20 +40,19 @@ public class RouterServlet extends HttpServlet {
             if (file.isDirectory()) {
                 scanAndRegisterControllers(file, basePackage + "." + file.getName());
             } else if (file.getName().endsWith(".class")) {
+
                 String className = file.getName().replace(".class", "");
+
                 try {
                     Class<?> clazz = Class.forName(basePackage + "." + className);
 
-                    // Optional: check annotation like @Controller
-                    if (clazz.getSimpleName().endsWith("Controller")) {
+                    if (clazz.isAnnotationPresent(core.annotation.Controller.class)) {
                         Object controller = clazz.getDeclaredConstructor().newInstance();
                         registerController(controller);
-                        getServletContext().setAttribute("routes", routes);
-                        getServletContext().setAttribute("controllers", controllers);
 
-                        System.out.println("Controllers");
-                        System.out.println("Registered: " + clazz.getName());
+                        System.out.println("Registered controller: " + clazz.getName());
                     }
+
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -76,17 +60,19 @@ public class RouterServlet extends HttpServlet {
         }
     }
 
-    // register controller
-    public void registerController(Object controller) {
+    private void registerController(Object controller) {
         Class<?> clazz = controller.getClass();
-        if (clazz.isAnnotationPresent(Controller.class)) {
-            for (Method method : clazz.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(Route.class)) {
-                    String path = method.getAnnotation(Route.class).value();
-                    routes.put(path, method);
-                    controllers.put(path, controller);
-                    System.out.println("Registered route: " + path + " → " + method.getName());
-                }
+
+        if (!clazz.isAnnotationPresent(Controller.class))
+            return;
+
+        for (Method method : clazz.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(Route.class)) {
+                String path = method.getAnnotation(Route.class).value();
+
+                routePatterns.add(new RoutePattern(path, method, controller));
+
+                System.out.println("Registered route: " + path + " → " + method.getName());
             }
         }
     }
@@ -103,56 +89,56 @@ public class RouterServlet extends HttpServlet {
 
     private void handleRequest(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String path = req.getRequestURI().replace(req.getContextPath(), "");
-        Method method = routes.get(path);
 
-        if (method == null) {
+        // Find a dynamic route match -- sprint 3 bbis
+        RoutePattern matched = null;
+        Map<String, String> params = null;
+
+        for (RoutePattern rp : routePatterns) {
+            params = rp.match(path);
+            if (params != null) {
+                matched = rp;
+                break;
+            }
+        }
+
+        if (matched == null) {
             resp.setStatus(404);
             resp.getWriter().write("404 - Not Found: " + path);
             return;
         }
 
         try {
-            Object controller = controllers.get(path);
-            String controllerName = controller.getClass().getSimpleName();
-            String methodName = method.getName();
+            // Invoke controller
+            Object result;
 
-            Class<?> returnType = method.getReturnType();
-            String returnTypeName = returnType.getSimpleName();
+            if (matched.method.getParameterCount() == 1 &&
+                    matched.method.getParameterTypes()[0] == Map.class) {
 
-            Object result = method.getParameterCount() == 4
-                    ? method.invoke(controller, path, methodName, controllerName,
-                            method.getReturnType().getSimpleName())
-                    : method.getParameterCount() == 3 ? method.invoke(controller, path, methodName, controllerName)
-                            : method.getParameterCount() == 2 ? method.invoke(controller, path, method.getName())
-                                    : method.invoke(controller);
+                result = matched.method.invoke(matched.controller, params);
 
-            // detect Modelview
-            // CASE 1: Controller returns ModelView → JSP
+            } else {
+                result = matched.method.invoke(matched.controller);
+            }
+
+            // Handle ModelView → JSP
             if (result instanceof ModelView mv) {
-
-                // send attributes to JSP
                 for (Map.Entry<String, Object> entry : mv.getData().entrySet()) {
                     req.setAttribute(entry.getKey(), entry.getValue());
                 }
 
-                // forward to JSP
                 req.getRequestDispatcher("/WEB-INF/views/" + mv.getView()).forward(req, resp);
                 return;
             }
 
-            // CASE 2: Controller returns String → print normally
+            // Handle String output
             if (result instanceof String str) {
                 resp.getWriter().write(str);
                 return;
             }
 
-            // CASE 3: Unsupported return
+            // Unsupported return
             resp.getWriter().write("Unsupported return type from controller");
-
-            // show type + value on response
-            resp.getWriter().write("controller:" + controller.getClass().getSimpleName() + "\n");
-            resp.getWriter().write("method: " + method.getName() + "\n");
-            resp.getWriter().write("Return type: " + returnType.getSimpleName() + "\n");
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -161,3 +147,18 @@ public class RouterServlet extends HttpServlet {
         }
     }
 }
+
+// test d'un controller
+// @Override
+// public void init() {
+// System.out.println(" Router initialized");
+// try {
+// Class<?> controllerClass = Class.forName("app.controllers.TestController");
+// Object controller = controllerClass.getDeclaredConstructor().newInstance();
+// registerController(controller);
+// } catch (Exception e) {
+// e.printStackTrace();
+// }
+// }
+
+// scanner tout les controller
