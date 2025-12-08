@@ -180,7 +180,7 @@ public class RouterServlet extends HttpServlet {
             // For now: allow null
 
             // Option 2:
-            // thorw new RuntimeException("Missing required parameter: " + key);
+            // throw new RuntimeException("Missing required parameter: " + key);
 
             // Convert to correct type
             Object converted = null;
