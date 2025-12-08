@@ -10,11 +10,13 @@ public class RoutePattern {
     public List<String> paramNames = new ArrayList<>();
     public Method method;
     public Object controller;
+    public String httpMethod;
 
-    public RoutePattern(String path, Method method, Object controller) {
+    public RoutePattern(String path, Method method, Object controller, String httpMethod) {
         this.original = path;
         this.method = method;
         this.controller = controller;
+        this.httpMethod = httpMethod;
 
         // Extract parameter names
         Matcher m = Pattern.compile("\\{([^/]+)}").matcher(path);

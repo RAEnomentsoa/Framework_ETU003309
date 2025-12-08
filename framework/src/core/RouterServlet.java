@@ -69,8 +69,8 @@ public class RouterServlet extends HttpServlet {
         for (Method method : clazz.getDeclaredMethods()) {
             if (method.isAnnotationPresent(Route.class)) {
                 String path = method.getAnnotation(Route.class).value();
-
-                routePatterns.add(new RoutePattern(path, method, controller));
+                String httpMethod = method.getAnnotation(Route.class).method();
+                routePatterns.add(new RoutePattern(path, method, controller, httpMethod));
 
                 System.out.println("Registered route: " + path + " → " + method.getName());
             }
@@ -89,17 +89,22 @@ public class RouterServlet extends HttpServlet {
 
     private void handleRequest(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String path = req.getRequestURI().replace(req.getContextPath(), "");
-
+        String requestMethod = req.getMethod();
         // Find a dynamic route match -- sprint 3 bbis
         RoutePattern matched = null;
         Map<String, String> params = null;
+        RoutePattern matchedMethod = null;
 
         // Look for a matching route
         for (RoutePattern rp : routePatterns) {
             params = rp.match(path);
             if (params != null) {
                 matched = rp;
-                break;
+                if (rp.httpMethod.equalsIgnoreCase(requestMethod)) {
+                    matchedMethod = rp;
+                    break;
+                }
+
             }
         }
 
@@ -108,6 +113,15 @@ public class RouterServlet extends HttpServlet {
             resp.getWriter().write("404 - Not Found: " + path);
             return;
         }
+        if (matchedMethod == null) {
+            resp.setStatus(405);
+            resp.getWriter().write("405 - Method " + requestMethod + " Not Allowed on " + path);
+            return;
+        }
+        // sprint 7 calling controller
+        matched = matchedMethod; // OK now, no redeclaration earlier
+
+        // SAME logic as before (injectParameters + invoke)
 
         try {
             // Prepare to inject parameters
