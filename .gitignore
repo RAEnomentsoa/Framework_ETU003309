@@ -1,15 +1,6 @@
-# Ignore build artifacts
-framework/build/
-build/
-
-# Ignore all .class files
-*.class
-
-# Ignore all .jar files
-*.jar
-
-# Ignore IntelliJ / Eclipse / VS Code junk
-/.idea/
-/.vscode/
-/target/
+# Ignore build directories and compiled files
+/framework/build/
 /out/
+/target/
+/*.jar
+*.class
