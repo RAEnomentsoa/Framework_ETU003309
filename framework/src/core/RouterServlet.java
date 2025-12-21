@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Map;
+import jakarta.servlet.ServletException;
 
 public class RouterServlet extends HttpServlet {
 
@@ -78,6 +79,20 @@ public class RouterServlet extends HttpServlet {
     }
 
     @Override
+    protected void service(HttpServletRequest req, HttpServletResponse resp)
+            throws ServletException, IOException {
+
+        // Handle PATCH explicitly (some servlet containers don't dispatch it to
+        // doPatch)
+        if ("PATCH".equalsIgnoreCase(req.getMethod())) {
+            handleRequest(req, resp);
+            return;
+        }
+
+        super.service(req, resp);
+    }
+
+    @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         handleRequest(req, resp);
     }
@@ -87,79 +102,131 @@ public class RouterServlet extends HttpServlet {
         handleRequest(req, resp);
     }
 
+    @Override
+    protected void doPut(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        handleRequest(req, resp);
+    }
+
+    @Override
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        handleRequest(req, resp);
+    }
+
+    @Override
+    protected void doOptions(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        handleRequest(req, resp);
+    }
+
+    @Override
+    protected void doHead(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        // head = same as get but without body (we manage in handleRequest)
+        handleRequest(req, resp);
+    }
+
     private void handleRequest(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String path = req.getRequestURI().replace(req.getContextPath(), "");
-        String requestMethod = req.getMethod();
-        // Find a dynamic route match -- sprint 3 bbis
-        RoutePattern matched = null;
-        Map<String, String> params = null;
-        RoutePattern matchedMethod = null;
+        String requestMethod = req.getMethod().toUpperCase();
 
-        // Look for a matching route
+        RoutePattern matchedByPath = null;
+        RoutePattern matchedByMethod = null;
+        Map<String, String> paramsForMethod = null;
+
+        // Collect allowed methods for this path (for 405 + Allow header)
+        java.util.Set<String> allowedMethods = new java.util.LinkedHashSet<>();
+
         for (RoutePattern rp : routePatterns) {
-            params = rp.match(path);
-            if (params != null) {
-                matched = rp;
+            Map<String, String> p = rp.match(path);
+            if (p != null) {
+                matchedByPath = rp;
+                allowedMethods.add(rp.httpMethod.toUpperCase());
+
                 if (rp.httpMethod.equalsIgnoreCase(requestMethod)) {
-                    matchedMethod = rp;
+                    matchedByMethod = rp;
+                    paramsForMethod = p;
                     break;
                 }
-
             }
         }
 
-        if (matched == null) {
-            resp.setStatus(404);
+        // 404 if no path matches
+        if (matchedByPath == null) {
+            resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
             resp.getWriter().write("404 - Not Found: " + path);
             return;
         }
-        if (matchedMethod == null) {
-            resp.setStatus(405);
+
+        // Auto support OPTIONS: return Allow
+        if ("OPTIONS".equals(requestMethod)) {
+            // Optional: also include HEAD if GET exists
+            if (allowedMethods.contains("GET"))
+                allowedMethods.add("HEAD");
+            resp.setStatus(HttpServletResponse.SC_NO_CONTENT);
+            resp.setHeader("Allow", String.join(", ", allowedMethods));
+            return;
+        }
+
+        // Auto support HEAD if GET exists (common framework behavior)
+        if ("HEAD".equals(requestMethod) && allowedMethods.contains("GET")) {
+            // Treat as GET but don't write body
+            requestMethod = "GET";
+            // Try again to find GET handler
+            for (RoutePattern rp : routePatterns) {
+                Map<String, String> p = rp.match(path);
+                if (p != null && rp.httpMethod.equalsIgnoreCase("GET")) {
+                    matchedByMethod = rp;
+                    paramsForMethod = p;
+                    break;
+                }
+            }
+        }
+
+        // 405 if path exists but method doesn't
+        if (matchedByMethod == null) {
+            if (allowedMethods.contains("GET"))
+                allowedMethods.add("HEAD");
+            resp.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+            resp.setHeader("Allow", String.join(", ", allowedMethods));
             resp.getWriter().write("405 - Method " + requestMethod + " Not Allowed on " + path);
             return;
         }
-        // sprint 7 calling controller
-        matched = matchedMethod; // OK now, no redeclaration earlier
 
-        // SAME logic as before (injectParameters + invoke)
-
+        // Invoke controller
         try {
-            // Prepare to inject parameters
             Object result;
 
-            // If the method has one parameter and it is a Map, inject the params into it
-            if (matched.method.getParameterCount() == 1 && matched.method.getParameterTypes()[0] == Map.class) {
-                result = matched.method.invoke(matched.controller, params);
-
+            if (matchedByMethod.method.getParameterCount() == 1
+                    && matchedByMethod.method.getParameterTypes()[0] == Map.class) {
+                result = matchedByMethod.method.invoke(matchedByMethod.controller, paramsForMethod);
             } else {
-                // Inject individual parameters based on method signature
-                Object[] methodArgs = injectParameters(matched.method, req, params);
-
-                result = matched.method.invoke(matched.controller, methodArgs);
+                Object[] methodArgs = injectParameters(matchedByMethod.method, req, paramsForMethod);
+                result = matchedByMethod.method.invoke(matchedByMethod.controller, methodArgs);
             }
 
-            // Handle ModelView → JSP
+            // If HEAD: never send body
+            boolean isHead = "HEAD".equalsIgnoreCase(req.getMethod());
+            if (isHead) {
+                resp.setStatus(HttpServletResponse.SC_OK);
+                return;
+            }
+
             if (result instanceof ModelView mv) {
                 for (Map.Entry<String, Object> entry : mv.getData().entrySet()) {
                     req.setAttribute(entry.getKey(), entry.getValue());
                 }
-
                 req.getRequestDispatcher("/WEB-INF/views/" + mv.getView()).forward(req, resp);
                 return;
             }
 
-            // Handle String output
             if (result instanceof String str) {
                 resp.getWriter().write(str);
                 return;
             }
 
-            // Unsupported return type
             resp.getWriter().write("Unsupported return type from controller");
 
         } catch (Exception e) {
             e.printStackTrace();
-            resp.setStatus(500);
+            resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             resp.getWriter().write("500 - Server error: " + e.getMessage());
         }
     }
