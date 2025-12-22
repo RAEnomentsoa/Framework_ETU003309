@@ -6,4 +6,6 @@ import java.lang.annotation.RetentionPolicy;
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Route {
     String value();
+
+    String method() default "GET";
 }
