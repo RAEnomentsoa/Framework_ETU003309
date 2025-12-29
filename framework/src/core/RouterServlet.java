@@ -194,9 +194,28 @@ public class RouterServlet extends HttpServlet {
         try {
             Object result;
 
-            if (matchedByMethod.method.getParameterCount() == 1
-                    && matchedByMethod.method.getParameterTypes()[0] == Map.class) {
-                result = matchedByMethod.method.invoke(matchedByMethod.controller, paramsForMethod);
+            int pc = matchedByMethod.method.getParameterCount();
+
+            if (pc == 1 && Map.class.isAssignableFrom(matchedByMethod.method.getParameterTypes()[0])) {
+
+                // Sprint 8: if controller wants Map<String,Object> -> send request data map
+                java.lang.reflect.Type generic = matchedByMethod.method.getGenericParameterTypes()[0];
+                String genericStr = generic.getTypeName(); // ex: java.util.Map<java.lang.String, java.lang.Object>
+
+                if (genericStr.contains("java.lang.Object")) {
+                    Map<String, Object> data = getValues(req);
+
+                    // OPTIONAL: also add path params inside the same map
+                    if (paramsForMethod != null)
+                        data.putAll(paramsForMethod);
+
+                    result = matchedByMethod.method.invoke(matchedByMethod.controller, data);
+
+                } else {
+                    // Old behavior: Map for path params (Map<String,String>)
+                    result = matchedByMethod.method.invoke(matchedByMethod.controller, paramsForMethod);
+                }
+
             } else {
                 Object[] methodArgs = injectParameters(matchedByMethod.method, req, paramsForMethod);
                 result = matchedByMethod.method.invoke(matchedByMethod.controller, methodArgs);
@@ -229,6 +248,29 @@ public class RouterServlet extends HttpServlet {
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
             resp.getWriter().write("500 - Server error: " + e.getMessage());
         }
+    }
+
+    private Map<String, Object> getValues(HttpServletRequest req) {
+        Map<String, Object> data = new java.util.HashMap<>();
+
+        // Servlet gives Map<String, String[]> directly
+        Map<String, String[]> raw = req.getParameterMap();
+
+        for (Map.Entry<String, String[]> e : raw.entrySet()) {
+            String key = e.getKey();
+            String[] values = e.getValue();
+
+            if (values == null)
+                continue;
+
+            if (values.length == 1) {
+                data.put(key, values[0]); // single input => String
+            } else {
+                // checkbox / multi-select => List<String> (value object style)
+                data.put(key, java.util.Arrays.asList(values));
+            }
+        }
+        return data;
     }
 
     private Object[] injectParameters(Method method, HttpServletRequest req, Map<String, String> pathParams) {
