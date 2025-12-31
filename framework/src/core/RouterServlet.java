@@ -24,6 +24,8 @@ public class RouterServlet extends HttpServlet {
 
     @Override
     public void init() {
+        core.AppContext.setWebInfPath(getServletContext().getRealPath("/WEB-INF"));
+
         System.out.println("Router initialized");
         String basePackage = "app.controllers";
         String path = getServletContext().getRealPath("/WEB-INF/classes/" + basePackage.replace('.', '/'));
@@ -264,20 +266,31 @@ public class RouterServlet extends HttpServlet {
         } catch (Exception e) {
             e.printStackTrace();
 
-            boolean isRest = matchedByMethod != null
-                    && (matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
+            // unwrap InvocationTargetException (common when method.invoke throws)
+            Throwable root = e;
+            if (e instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null) {
+                root = ite.getCause();
+            } else if (e.getCause() != null) {
+                root = e.getCause();
+            }
+
+            String msg = (root.getMessage() != null) ? root.getMessage() : root.toString();
+
+            boolean isRest = matchedByMethod != null &&
+                    (matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
                             || matchedByMethod.method.isAnnotationPresent(RestAPI.class));
 
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
 
             if (isRest) {
                 resp.setContentType("application/json;charset=UTF-8");
-                ApiResponse api = new ApiResponse(500, "error", e.getMessage());
+                ApiResponse api = new ApiResponse(500, "error", msg);
                 resp.getWriter().write(toJson(api));
             } else {
-                resp.getWriter().write("500 - Server error: " + e.getMessage());
+                resp.getWriter().write("500 - Server error: " + msg);
             }
         }
+
     }
 
     // ===================== SPRINT 10: MULTIPART HELPERS =====================
