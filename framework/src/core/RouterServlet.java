@@ -1,9 +1,12 @@
+
 package core;
 
 import core.annotation.Controller;
 import core.annotation.RestAPI;
 import core.annotation.Route;
 import core.rest.ApiResponse;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.MultipartConfig;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -12,8 +15,8 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Map;
-import jakarta.servlet.ServletException;
 
+@MultipartConfig
 public class RouterServlet extends HttpServlet {
 
     // New dynamic route system
@@ -43,16 +46,13 @@ public class RouterServlet extends HttpServlet {
             if (file.isDirectory()) {
                 scanAndRegisterControllers(file, basePackage + "." + file.getName());
             } else if (file.getName().endsWith(".class")) {
-
                 String className = file.getName().replace(".class", "");
-
                 try {
                     Class<?> clazz = Class.forName(basePackage + "." + className);
 
                     if (clazz.isAnnotationPresent(core.annotation.Controller.class)) {
                         Object controller = clazz.getDeclaredConstructor().newInstance();
                         registerController(controller);
-
                         System.out.println("Registered controller: " + clazz.getName());
                     }
 
@@ -65,7 +65,6 @@ public class RouterServlet extends HttpServlet {
 
     private void registerController(Object controller) {
         Class<?> clazz = controller.getClass();
-
         if (!clazz.isAnnotationPresent(Controller.class))
             return;
 
@@ -74,7 +73,6 @@ public class RouterServlet extends HttpServlet {
                 String path = method.getAnnotation(Route.class).value();
                 String httpMethod = method.getAnnotation(Route.class).method();
                 routePatterns.add(new RoutePattern(path, method, controller, httpMethod));
-
                 System.out.println("Registered route: " + path + " → " + method.getName());
             }
         }
@@ -90,7 +88,6 @@ public class RouterServlet extends HttpServlet {
             handleRequest(req, resp);
             return;
         }
-
         super.service(req, resp);
     }
 
@@ -151,7 +148,6 @@ public class RouterServlet extends HttpServlet {
         }
 
         // 404 if no path matches
-        // 404 if no path matches
         if (matchedByPath == null) {
             if (isApiPath(path)) {
                 writeJsonError(resp, 404, "Not Found: " + path);
@@ -191,7 +187,6 @@ public class RouterServlet extends HttpServlet {
         if (matchedByMethod == null) {
             if (allowedMethods.contains("GET"))
                 allowedMethods.add("HEAD");
-
             resp.setHeader("Allow", String.join(", ", allowedMethods));
 
             if (isApiPath(path)) {
@@ -210,14 +205,14 @@ public class RouterServlet extends HttpServlet {
             int pc = matchedByMethod.method.getParameterCount();
 
             if (pc == 1 && Map.class.isAssignableFrom(matchedByMethod.method.getParameterTypes()[0])) {
-                // Sprint 8 (Map) — tu gardes ton comportement existant
+                // Sprint 8 (Map)
                 result = matchedByMethod.method.invoke(matchedByMethod.controller, paramsForMethod);
 
             } else if (pc == 1) {
                 // Sprint 8-bis (Value Object / POJO)
                 Class<?> paramType = matchedByMethod.method.getParameterTypes()[0];
 
-                // On exclut les types simples déjà gérés ailleurs
+                // Exclude servlet types
                 if (paramType != HttpServletRequest.class && paramType != HttpServletResponse.class) {
                     Object obj = buildObjectFromRequest(paramType, req);
                     result = matchedByMethod.method.invoke(matchedByMethod.controller, obj);
@@ -227,13 +222,12 @@ public class RouterServlet extends HttpServlet {
                 }
 
             } else {
-                // Sprint 6/7 — injection classique
+                // Sprint 6/7 — classic injection
                 Object[] methodArgs = injectParameters(matchedByMethod.method, req, paramsForMethod);
                 result = matchedByMethod.method.invoke(matchedByMethod.controller, methodArgs);
             }
 
-            // Api rest
-
+            // REST ?
             boolean isRest = matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
                     || matchedByMethod.method.isAnnotationPresent(RestAPI.class);
 
@@ -247,8 +241,7 @@ public class RouterServlet extends HttpServlet {
             }
 
             // If HEAD: never send body
-            boolean isHead = "HEAD".equalsIgnoreCase(req.getMethod());
-            if (isHead) {
+            if ("HEAD".equalsIgnoreCase(req.getMethod())) {
                 resp.setStatus(HttpServletResponse.SC_OK);
                 return;
             }
@@ -271,8 +264,8 @@ public class RouterServlet extends HttpServlet {
         } catch (Exception e) {
             e.printStackTrace();
 
-            boolean isRest = matchedByMethod != null &&
-                    (matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
+            boolean isRest = matchedByMethod != null
+                    && (matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
                             || matchedByMethod.method.isAnnotationPresent(RestAPI.class));
 
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
@@ -285,40 +278,82 @@ public class RouterServlet extends HttpServlet {
                 resp.getWriter().write("500 - Server error: " + e.getMessage());
             }
         }
-
     }
+
+    // ===================== SPRINT 10: MULTIPART HELPERS =====================
+
+    private boolean isMultipart(HttpServletRequest req) {
+        String ct = req.getContentType();
+        return ct != null && ct.toLowerCase().startsWith("multipart/");
+    }
+
+    private java.util.Map<String, jakarta.servlet.http.Part> getFilePartsByName(HttpServletRequest req) {
+        java.util.Map<String, jakarta.servlet.http.Part> map = new java.util.HashMap<>();
+        if (!isMultipart(req))
+            return map;
+
+        try {
+            for (jakarta.servlet.http.Part part : req.getParts()) {
+                String submitted = part.getSubmittedFileName();
+                if (submitted != null && !submitted.isBlank()) {
+                    map.put(part.getName(), part); // key = input name
+                }
+            }
+        } catch (Exception ignored) {
+            // if not multipart / container error -> ignore and let normal injection proceed
+        }
+        return map;
+    }
+
+    private core.FileUpload toFileUpload(jakarta.servlet.http.Part part) throws IOException {
+        String fileName = part.getSubmittedFileName();
+        String contentType = part.getContentType();
+        byte[] bytes = part.getInputStream().readAllBytes();
+        return new core.FileUpload(fileName, bytes, contentType);
+    }
+
+    // ===================== END SPRINT 10 HELPERS =====================
 
     private Map<String, Object> getValues(HttpServletRequest req) {
         Map<String, Object> data = new java.util.HashMap<>();
-
-        // Servlet gives Map<String, String[]> directly
         Map<String, String[]> raw = req.getParameterMap();
 
         for (Map.Entry<String, String[]> e : raw.entrySet()) {
             String key = e.getKey();
             String[] values = e.getValue();
-
             if (values == null)
                 continue;
 
             if (values.length == 1) {
-                data.put(key, values[0]); // single input => String
+                data.put(key, values[0]);
             } else {
-                // checkbox / multi-select => List<String> (value object style)
                 data.put(key, java.util.Arrays.asList(values));
             }
         }
         return data;
     }
 
+    // ===================== SPRINT 10: POJO + FileUpload =====================
     private Object buildObjectFromRequest(Class<?> clazz, HttpServletRequest req) throws Exception {
         Object obj = clazz.getDeclaredConstructor().newInstance();
+
+        // pre-load file parts once (merge-friendly)
+        java.util.Map<String, jakarta.servlet.http.Part> fileParts = getFilePartsByName(req);
 
         for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
             field.setAccessible(true);
 
             String name = field.getName();
             Class<?> type = field.getType();
+
+            // ---- SPRINT 10: FileUpload field in VO/POJO ----
+            if (type == core.FileUpload.class) {
+                jakarta.servlet.http.Part part = fileParts.get(name);
+                if (part != null) {
+                    field.set(obj, toFileUpload(part));
+                }
+                continue;
+            }
 
             // Always use parameterValues first (supports checkbox/multi-select)
             String[] values = req.getParameterValues(name);
@@ -352,10 +387,8 @@ public class RouterServlet extends HttpServlet {
             } else if (type == double.class || type == Double.class) {
                 converted = Double.parseDouble(raw);
             } else if (type == boolean.class || type == Boolean.class) {
-                // checkbox often sends "on"
                 converted = raw.equalsIgnoreCase("true") || raw.equalsIgnoreCase("on") || raw.equals("1");
             } else {
-                // fallback
                 converted = raw;
             }
 
@@ -364,8 +397,9 @@ public class RouterServlet extends HttpServlet {
 
         return obj;
     }
+    // ===================== END SPRINT 10 POJO =====================
 
-    // ------------- REST JSON --------------------
+    // ===================== REST JSON =====================
 
     private String toJson(Object obj) {
         if (obj == null)
@@ -378,10 +412,8 @@ public class RouterServlet extends HttpServlet {
 
         if (obj instanceof java.util.Map<?, ?> map)
             return toJsonMap(map);
-
         if (obj instanceof Iterable<?> it)
             return toJsonIterable(it);
-
         if (obj.getClass().isArray())
             return toJsonArray(obj);
 
@@ -436,7 +468,6 @@ public class RouterServlet extends HttpServlet {
     }
 
     private String toJsonObject(Object obj) {
-        // POJO -> JSON via fields
         StringBuilder sb = new StringBuilder("{");
         boolean first = true;
         for (java.lang.reflect.Field f : obj.getClass().getDeclaredFields()) {
@@ -466,51 +497,72 @@ public class RouterServlet extends HttpServlet {
         resp.getWriter().write(toJson(api));
     }
 
-    // --------- REST JSON ---------
+    // ===================== PARAM INJECTION (Sprint 6/7 + Sprint 10)
+    // =====================
 
     private Object[] injectParameters(Method method, HttpServletRequest req, Map<String, String> pathParams) {
         Object[] params = new Object[method.getParameterCount()];
 
+        // SPRINT 10: prepare file parts once (merge-friendly)
+        java.util.Map<String, jakarta.servlet.http.Part> fileParts = getFilePartsByName(req);
+
         for (int i = 0; i < method.getParameterCount(); i++) {
 
-            // Parameter metadata
             java.lang.reflect.Parameter parameter = method.getParameters()[i];
             Class<?> paramType = parameter.getType();
-            String paramName = parameter.getName(); // fallback if no annotation
+            String paramName = parameter.getName();
 
             // ORDER 1: Check @RequestParam annotation
             core.annotation.RequestParam rp = parameter.getAnnotation(core.annotation.RequestParam.class);
             String key = (rp != null) ? rp.value() : paramName;
 
+            // ----------------- SPRINT 10: direct FileUpload parameter -----------------
+            if (paramType == core.FileUpload.class) {
+                jakarta.servlet.http.Part part = fileParts.get(key);
+                if (part != null) {
+                    try {
+                        params[i] = toFileUpload(part);
+                    } catch (IOException ex) {
+                        throw new RuntimeException("Failed to read uploaded file: " + key, ex);
+                    }
+                } else {
+                    params[i] = null; // or throw if required
+                }
+                continue;
+            }
+            // -------------------------------------------------------------------------
+
             String rawValue = null;
 
-            // ORDER 2: FIRST try URL {variables}
+            // ORDER 2: URL {variables}
             if (pathParams != null && pathParams.containsKey(key)) {
                 rawValue = pathParams.get(key);
             }
 
-            // ORDER 3: If not found, try query string / form
+            // ORDER 3: query string / form
             if (rawValue == null) {
                 rawValue = req.getParameter(key);
             }
 
-            // ORDER 4: If still null → you decide (set null or throw error)
-            // For now: allow null
-
-            // Option 2:
-            // throw new RuntimeException("Missing required parameter: " + key);
-
             // Convert to correct type
-            Object converted = null;
+            Object converted;
 
             if (paramType == String.class) {
                 converted = rawValue;
-            } else if ((paramType == int.class || paramType == Integer.class)) {
+            } else if (paramType == int.class || paramType == Integer.class) {
                 converted = (rawValue != null) ? Integer.parseInt(rawValue) : 0;
-            } else if ((paramType == boolean.class || paramType == Boolean.class)) {
+            } else if (paramType == boolean.class || paramType == Boolean.class) {
                 converted = (rawValue != null) ? Boolean.parseBoolean(rawValue) : false;
+            } else if (paramType == long.class || paramType == Long.class) {
+                converted = (rawValue != null) ? Long.parseLong(rawValue) : 0L;
+            } else if (paramType == double.class || paramType == Double.class) {
+                converted = (rawValue != null) ? Double.parseDouble(rawValue) : 0.0;
+            } else if (paramType == HttpServletRequest.class) {
+                converted = req;
+            } else if (paramType == HttpServletResponse.class) {
+                converted = null; // you can support resp injection if you want later
             } else {
-                converted = rawValue; // fallback default
+                converted = rawValue;
             }
 
             params[i] = converted;
@@ -518,7 +570,6 @@ public class RouterServlet extends HttpServlet {
 
         return params;
     }
-
 }
 
 // test d'un controller
