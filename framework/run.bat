@@ -21,6 +21,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Step 1 - Compile Rest
+echo Compiling annotations...
+javac -d %BUILD_DIR% %SRC_DIR%\core\rest\*.java
+if errorlevel 1 (
+    echo Failed to compile rest!
+    exit /b 1
+)
+
 REM Step 2 - Compile the rest (Router, etc.)
 echo Compiling other Java sources...
 javac -d %BUILD_DIR% -cp "%BUILD_DIR%;%LIB_DIR%\*" %SRC_DIR%\core\*.java
