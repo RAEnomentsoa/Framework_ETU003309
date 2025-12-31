@@ -197,26 +197,24 @@ public class RouterServlet extends HttpServlet {
             int pc = matchedByMethod.method.getParameterCount();
 
             if (pc == 1 && Map.class.isAssignableFrom(matchedByMethod.method.getParameterTypes()[0])) {
+                // Sprint 8 (Map) — tu gardes ton comportement existant
+                result = matchedByMethod.method.invoke(matchedByMethod.controller, paramsForMethod);
 
-                // Sprint 8: if controller wants Map<String,Object> -> send request data map
-                java.lang.reflect.Type generic = matchedByMethod.method.getGenericParameterTypes()[0];
-                String genericStr = generic.getTypeName(); // ex: java.util.Map<java.lang.String, java.lang.Object>
+            } else if (pc == 1) {
+                // Sprint 8-bis (Value Object / POJO)
+                Class<?> paramType = matchedByMethod.method.getParameterTypes()[0];
 
-                if (genericStr.contains("java.lang.Object")) {
-                    Map<String, Object> data = getValues(req);
-
-                    // OPTIONAL: also add path params inside the same map
-                    if (paramsForMethod != null)
-                        data.putAll(paramsForMethod);
-
-                    result = matchedByMethod.method.invoke(matchedByMethod.controller, data);
-
+                // On exclut les types simples déjà gérés ailleurs
+                if (paramType != HttpServletRequest.class && paramType != HttpServletResponse.class) {
+                    Object obj = buildObjectFromRequest(paramType, req);
+                    result = matchedByMethod.method.invoke(matchedByMethod.controller, obj);
                 } else {
-                    // Old behavior: Map for path params (Map<String,String>)
-                    result = matchedByMethod.method.invoke(matchedByMethod.controller, paramsForMethod);
+                    Object[] methodArgs = injectParameters(matchedByMethod.method, req, paramsForMethod);
+                    result = matchedByMethod.method.invoke(matchedByMethod.controller, methodArgs);
                 }
 
             } else {
+                // Sprint 6/7 — injection classique
                 Object[] methodArgs = injectParameters(matchedByMethod.method, req, paramsForMethod);
                 result = matchedByMethod.method.invoke(matchedByMethod.controller, methodArgs);
             }
@@ -271,6 +269,48 @@ public class RouterServlet extends HttpServlet {
             }
         }
         return data;
+    }
+
+    private Object buildObjectFromRequest(Class<?> clazz, HttpServletRequest req) throws Exception {
+        Object obj = clazz.getDeclaredConstructor().newInstance();
+
+        for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+            field.setAccessible(true);
+
+            String fieldName = field.getName();
+            Class<?> fieldType = field.getType();
+
+            String rawValue = req.getParameter(fieldName);
+
+            // Checkbox non cochée -> null (donc laisse false par défaut)
+            if (rawValue == null) {
+                continue;
+            }
+
+            Object converted;
+
+            if (fieldType == String.class) {
+                converted = rawValue;
+            } else if (fieldType == int.class || fieldType == Integer.class) {
+                converted = Integer.parseInt(rawValue);
+            } else if (fieldType == boolean.class || fieldType == Boolean.class) {
+                // HTML checkbox renvoie souvent "on"
+                converted = rawValue.equalsIgnoreCase("true") || rawValue.equalsIgnoreCase("on");
+            } else if (fieldType == double.class || fieldType == Double.class) {
+                converted = Double.parseDouble(rawValue);
+            } else if (fieldType == float.class || fieldType == Float.class) {
+                converted = Float.parseFloat(rawValue);
+            } else if (fieldType == long.class || fieldType == Long.class) {
+                converted = Long.parseLong(rawValue);
+            } else {
+                // fallback: garder en String
+                converted = rawValue;
+            }
+
+            field.set(obj, converted);
+        }
+
+        return obj;
     }
 
     private Object[] injectParameters(Method method, HttpServletRequest req, Map<String, String> pathParams) {
