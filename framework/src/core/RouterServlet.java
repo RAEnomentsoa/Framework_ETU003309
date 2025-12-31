@@ -1,7 +1,9 @@
 package core;
 
 import core.annotation.Controller;
+import core.annotation.RestAPI;
 import core.annotation.Route;
+import core.rest.ApiResponse;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -149,9 +151,14 @@ public class RouterServlet extends HttpServlet {
         }
 
         // 404 if no path matches
+        // 404 if no path matches
         if (matchedByPath == null) {
-            resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            resp.getWriter().write("404 - Not Found: " + path);
+            if (isApiPath(path)) {
+                writeJsonError(resp, 404, "Not Found: " + path);
+            } else {
+                resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                resp.getWriter().write("404 - Not Found: " + path);
+            }
             return;
         }
 
@@ -184,9 +191,15 @@ public class RouterServlet extends HttpServlet {
         if (matchedByMethod == null) {
             if (allowedMethods.contains("GET"))
                 allowedMethods.add("HEAD");
-            resp.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+
             resp.setHeader("Allow", String.join(", ", allowedMethods));
-            resp.getWriter().write("405 - Method " + requestMethod + " Not Allowed on " + path);
+
+            if (isApiPath(path)) {
+                writeJsonError(resp, 405, "Method " + requestMethod + " Not Allowed on " + path);
+            } else {
+                resp.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+                resp.getWriter().write("405 - Method " + requestMethod + " Not Allowed on " + path);
+            }
             return;
         }
 
@@ -219,6 +232,20 @@ public class RouterServlet extends HttpServlet {
                 result = matchedByMethod.method.invoke(matchedByMethod.controller, methodArgs);
             }
 
+            // Api rest
+
+            boolean isRest = matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
+                    || matchedByMethod.method.isAnnotationPresent(RestAPI.class);
+
+            if (isRest) {
+                resp.setContentType("application/json;charset=UTF-8");
+                resp.setStatus(HttpServletResponse.SC_OK);
+
+                ApiResponse api = new ApiResponse(200, "success", result);
+                resp.getWriter().write(toJson(api));
+                return;
+            }
+
             // If HEAD: never send body
             boolean isHead = "HEAD".equalsIgnoreCase(req.getMethod());
             if (isHead) {
@@ -243,9 +270,22 @@ public class RouterServlet extends HttpServlet {
 
         } catch (Exception e) {
             e.printStackTrace();
+
+            boolean isRest = matchedByMethod != null &&
+                    (matchedByMethod.controller.getClass().isAnnotationPresent(RestAPI.class)
+                            || matchedByMethod.method.isAnnotationPresent(RestAPI.class));
+
             resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            resp.getWriter().write("500 - Server error: " + e.getMessage());
+
+            if (isRest) {
+                resp.setContentType("application/json;charset=UTF-8");
+                ApiResponse api = new ApiResponse(500, "error", e.getMessage());
+                resp.getWriter().write(toJson(api));
+            } else {
+                resp.getWriter().write("500 - Server error: " + e.getMessage());
+            }
         }
+
     }
 
     private Map<String, Object> getValues(HttpServletRequest req) {
@@ -324,6 +364,109 @@ public class RouterServlet extends HttpServlet {
 
         return obj;
     }
+
+    // ------------- REST JSON --------------------
+
+    private String toJson(Object obj) {
+        if (obj == null)
+            return "null";
+
+        if (obj instanceof String s)
+            return "\"" + escapeJson(s) + "\"";
+        if (obj instanceof Number || obj instanceof Boolean)
+            return obj.toString();
+
+        if (obj instanceof java.util.Map<?, ?> map)
+            return toJsonMap(map);
+
+        if (obj instanceof Iterable<?> it)
+            return toJsonIterable(it);
+
+        if (obj.getClass().isArray())
+            return toJsonArray(obj);
+
+        return toJsonObject(obj);
+    }
+
+    private String escapeJson(String s) {
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    private String toJsonMap(java.util.Map<?, ?> map) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (var e : map.entrySet()) {
+            if (!first)
+                sb.append(",");
+            first = false;
+            sb.append("\"").append(escapeJson(String.valueOf(e.getKey()))).append("\":");
+            sb.append(toJson(e.getValue()));
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private String toJsonIterable(Iterable<?> it) {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (Object v : it) {
+            if (!first)
+                sb.append(",");
+            first = false;
+            sb.append(toJson(v));
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    private String toJsonArray(Object arr) {
+        int len = java.lang.reflect.Array.getLength(arr);
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < len; i++) {
+            if (i > 0)
+                sb.append(",");
+            sb.append(toJson(java.lang.reflect.Array.get(arr, i)));
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    private String toJsonObject(Object obj) {
+        // POJO -> JSON via fields
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (java.lang.reflect.Field f : obj.getClass().getDeclaredFields()) {
+            f.setAccessible(true);
+            try {
+                Object val = f.get(obj);
+                if (!first)
+                    sb.append(",");
+                first = false;
+                sb.append("\"").append(escapeJson(f.getName())).append("\":");
+                sb.append(toJson(val));
+            } catch (Exception ignored) {
+            }
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private boolean isApiPath(String path) {
+        return path != null && path.startsWith("/api");
+    }
+
+    private void writeJsonError(HttpServletResponse resp, int code, String msg) throws IOException {
+        resp.setStatus(code);
+        resp.setContentType("application/json;charset=UTF-8");
+        core.rest.ApiResponse api = new core.rest.ApiResponse(code, "error", msg);
+        resp.getWriter().write(toJson(api));
+    }
+
+    // --------- REST JSON ---------
 
     private Object[] injectParameters(Method method, HttpServletRequest req, Map<String, String> pathParams) {
         Object[] params = new Object[method.getParameterCount()];
