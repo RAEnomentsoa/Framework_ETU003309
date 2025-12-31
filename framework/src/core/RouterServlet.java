@@ -277,34 +277,46 @@ public class RouterServlet extends HttpServlet {
         for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
             field.setAccessible(true);
 
-            String fieldName = field.getName();
-            Class<?> fieldType = field.getType();
+            String name = field.getName();
+            Class<?> type = field.getType();
 
-            String rawValue = req.getParameter(fieldName);
+            // Always use parameterValues first (supports checkbox/multi-select)
+            String[] values = req.getParameterValues(name);
+            if (values == null)
+                continue;
 
-            // Checkbox non cochée -> null (donc laisse false par défaut)
-            if (rawValue == null) {
+            // ---- MULTI VALUES ----
+            if (java.util.List.class.isAssignableFrom(type)) {
+                field.set(obj, java.util.Arrays.asList(values));
                 continue;
             }
 
+            if (type.isArray() && type.getComponentType() == String.class) {
+                field.set(obj, values);
+                continue;
+            }
+
+            // ---- SINGLE VALUE ----
+            String raw = (values.length > 0) ? values[0] : null;
+            if (raw == null)
+                continue;
+
             Object converted;
 
-            if (fieldType == String.class) {
-                converted = rawValue;
-            } else if (fieldType == int.class || fieldType == Integer.class) {
-                converted = Integer.parseInt(rawValue);
-            } else if (fieldType == boolean.class || fieldType == Boolean.class) {
-                // HTML checkbox renvoie souvent "on"
-                converted = rawValue.equalsIgnoreCase("true") || rawValue.equalsIgnoreCase("on");
-            } else if (fieldType == double.class || fieldType == Double.class) {
-                converted = Double.parseDouble(rawValue);
-            } else if (fieldType == float.class || fieldType == Float.class) {
-                converted = Float.parseFloat(rawValue);
-            } else if (fieldType == long.class || fieldType == Long.class) {
-                converted = Long.parseLong(rawValue);
+            if (type == String.class) {
+                converted = raw;
+            } else if (type == int.class || type == Integer.class) {
+                converted = Integer.parseInt(raw);
+            } else if (type == long.class || type == Long.class) {
+                converted = Long.parseLong(raw);
+            } else if (type == double.class || type == Double.class) {
+                converted = Double.parseDouble(raw);
+            } else if (type == boolean.class || type == Boolean.class) {
+                // checkbox often sends "on"
+                converted = raw.equalsIgnoreCase("true") || raw.equalsIgnoreCase("on") || raw.equals("1");
             } else {
-                // fallback: garder en String
-                converted = rawValue;
+                // fallback
+                converted = raw;
             }
 
             field.set(obj, converted);
