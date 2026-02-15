@@ -9,6 +9,7 @@ public class Session {
     private final HttpSession httpSession;
 
     public Session(HttpSession session) {
+        System.out.println("Session constructor called. httpSession=" + session);
         this.httpSession = session;
     }
 
