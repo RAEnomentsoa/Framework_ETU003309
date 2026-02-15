@@ -544,7 +544,13 @@ public class RouterServlet extends HttpServlet {
                 continue;
             }
             // -------------------------------------------------------------------------
-
+            // ===================== SPRINT 11: Session Injection =====================
+            if (paramType == core.Session.class) {
+                jakarta.servlet.http.HttpSession httpSession = req.getSession();
+                params[i] = new core.Session(httpSession);
+                continue;
+            }
+            // -------------------------------------------------------------------------
             String rawValue = null;
 
             // ORDER 2: URL {variables}
