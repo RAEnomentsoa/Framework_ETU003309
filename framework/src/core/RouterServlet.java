@@ -4,6 +4,7 @@ package core;
 import core.annotation.Controller;
 import core.annotation.RestAPI;
 import core.annotation.Route;
+import core.annotation.Authorized;
 import core.rest.ApiResponse;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.MultipartConfig;
@@ -225,7 +226,9 @@ public class RouterServlet extends HttpServlet {
                 Class<?> paramType = matchedByMethod.method.getParameterTypes()[0];
 
                 // Exclude servlet types
-                if (paramType != HttpServletRequest.class && paramType != HttpServletResponse.class) {
+                if (paramType != HttpServletRequest.class
+                        && paramType != HttpServletResponse.class
+                        && paramType != core.Session.class) {
                     Object obj = buildObjectFromRequest(paramType, req);
                     result = matchedByMethod.method.invoke(matchedByMethod.controller, obj);
                 } else {
@@ -584,9 +587,12 @@ public class RouterServlet extends HttpServlet {
                 converted = req;
             } else if (paramType == HttpServletResponse.class) {
                 converted = null; // you can support resp injection if you want later
-            } else {
+            }else if (paramType == core.Session.class) {
+                 converted = new core.Session(req.getSession());
+            }else {
                 converted = rawValue;
             }
+
 
             params[i] = converted;
         }
