@@ -200,6 +200,16 @@ public class RouterServlet extends HttpServlet {
             return;
         }
 
+        // --- Authorization check (Sprint 11bis) ---
+        Authorized auth = matchedByMethod.method.getAnnotation(Authorized.class);
+        if (auth != null) {
+            Session session = new Session(req.getSession());
+            if (!AuthorizationManager.enforce(session, auth.value(), resp)) {
+                return; // Stop processing if access denied
+            }
+        }
+
+
         // Invoke controller
         try {
             Object result;
