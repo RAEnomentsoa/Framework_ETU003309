@@ -347,70 +347,82 @@ public class RouterServlet extends HttpServlet {
     }
 
     // ===================== SPRINT 10: POJO + FileUpload =====================
-    private Object buildObjectFromRequest(Class<?> clazz, HttpServletRequest req) throws Exception {
-        Object obj = clazz.getDeclaredConstructor().newInstance();
+  private Object buildObjectFromRequest(Class<?> clazz, HttpServletRequest req) throws Exception {
+     //Special case: don't instantiate Session reflectively
+    if (clazz == core.Session.class) {
+        return new core.Session(req.getSession());
+    }
 
-        // pre-load file parts once (merge-friendly)
-        java.util.Map<String, jakarta.servlet.http.Part> fileParts = getFilePartsByName(req);
+    // Step 1: Create main object via no-arg constructor
+    Object obj = clazz.getDeclaredConstructor().newInstance();
 
-        for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
-            field.setAccessible(true);
+    // Step 2: pre-load file parts once (merge-friendly)
+    java.util.Map<String, jakarta.servlet.http.Part> fileParts = getFilePartsByName(req);
 
-            String name = field.getName();
-            Class<?> type = field.getType();
+    // Step 3: populate fields
+    for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+        field.setAccessible(true);
 
-            // ---- SPRINT 10: FileUpload field in VO/POJO ----
-            if (type == core.FileUpload.class) {
-                jakarta.servlet.http.Part part = fileParts.get(name);
-                if (part != null) {
-                    field.set(obj, toFileUpload(part));
-                }
-                continue;
-            }
+        String name = field.getName();
+        Class<?> type = field.getType();
 
-            // Always use parameterValues first (supports checkbox/multi-select)
-            String[] values = req.getParameterValues(name);
-            if (values == null)
-                continue;
-
-            // ---- MULTI VALUES ----
-            if (java.util.List.class.isAssignableFrom(type)) {
-                field.set(obj, java.util.Arrays.asList(values));
-                continue;
-            }
-
-            if (type.isArray() && type.getComponentType() == String.class) {
-                field.set(obj, values);
-                continue;
-            }
-
-            // ---- SINGLE VALUE ----
-            String raw = (values.length > 0) ? values[0] : null;
-            if (raw == null)
-                continue;
-
-            Object converted;
-
-            if (type == String.class) {
-                converted = raw;
-            } else if (type == int.class || type == Integer.class) {
-                converted = Integer.parseInt(raw);
-            } else if (type == long.class || type == Long.class) {
-                converted = Long.parseLong(raw);
-            } else if (type == double.class || type == Double.class) {
-                converted = Double.parseDouble(raw);
-            } else if (type == boolean.class || type == Boolean.class) {
-                converted = raw.equalsIgnoreCase("true") || raw.equalsIgnoreCase("on") || raw.equals("1");
-            } else {
-                converted = raw;
-            }
-
-            field.set(obj, converted);
+        // ===== SPRINT 11: Session Injection =====
+        if (type == core.Session.class) {
+            // Directly inject Session; DO NOT call newInstance() on Session
+            field.set(obj, new core.Session(req.getSession()));
+            continue;
         }
 
-        return obj;
+        // ---- SPRINT 10: FileUpload field in VO/POJO ----
+        if (type == core.FileUpload.class) {
+            jakarta.servlet.http.Part part = fileParts.get(name);
+            if (part != null) {
+                field.set(obj, toFileUpload(part));
+            }
+            continue;
+        }
+
+        // ---- Handle regular request parameters ----
+        String[] values = req.getParameterValues(name);
+        if (values == null || values.length == 0)
+            continue;
+
+        // ---- MULTI VALUE ----
+        if (java.util.List.class.isAssignableFrom(type)) {
+            field.set(obj, java.util.Arrays.asList(values));
+            continue;
+        }
+
+        if (type.isArray() && type.getComponentType() == String.class) {
+            field.set(obj, values);
+            continue;
+        }
+
+        // ---- SINGLE VALUE ----
+        String raw = values[0];
+        Object converted;
+
+        if (type == String.class) {
+            converted = raw;
+        } else if (type == int.class || type == Integer.class) {
+            converted = Integer.parseInt(raw);
+        } else if (type == long.class || type == Long.class) {
+            converted = Long.parseLong(raw);
+        } else if (type == double.class || type == Double.class) {
+            converted = Double.parseDouble(raw);
+        } else if (type == boolean.class || type == Boolean.class) {
+            converted = raw.equalsIgnoreCase("true") || raw.equalsIgnoreCase("on") || raw.equals("1");
+        } else {
+            converted = raw;
+        }
+
+        field.set(obj, converted);
     }
-    // ===================== END SPRINT 10 POJO =====================
+
+    return obj;
+}
+
+    
 
     // ===================== REST JSON =====================
 
@@ -544,7 +556,13 @@ public class RouterServlet extends HttpServlet {
                 continue;
             }
             // -------------------------------------------------------------------------
-
+            // ===================== SPRINT 11: Session Injection =====================
+            if (paramType == core.Session.class) {
+                jakarta.servlet.http.HttpSession httpSession = req.getSession();
+                params[i] = new core.Session(httpSession);
+                continue;
+            }
+            // -------------------------------------------------------------------------
             String rawValue = null;
 
             // ORDER 2: URL {variables}
